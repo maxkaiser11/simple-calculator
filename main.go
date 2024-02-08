@@ -11,6 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var db *sql.DB
+
 func main() {
 	err := ui.Main(func() {
 		db, err := sql.Open("sqlite3", "./users.db")
@@ -39,7 +41,7 @@ func main() {
 		registerButton := ui.NewButton("Register")
 		calculationEntry := ui.NewEntry()
 		calculationEntry.SetReadOnly(true)
-		// var currentExpression string
+		var currentExpression string
 
 		buttons := [][]string{
 			{"7", "8", "9", "/"},
@@ -54,6 +56,9 @@ func main() {
 			for j, label := range row {
 				button := ui.NewButton(label)
 				buttonGrid.Append(button, i, j, 1, 1, false, ui.AlignFill, false, ui.AlignFill)
+				button.OnClicked(func(*ui.Button) {
+					handleButtonClick(label, &currentExpression, calculationEntry)
+				})
 			}
 		}
 
@@ -77,8 +82,6 @@ func main() {
 		window := ui.NewWindow("Login App", 400, 300, false)
 		window.SetChild(box)
 
-		defer db.Close()
-
 		loginButton.OnClicked(func(*ui.Button) {
 			username := usernameEntry.Text()
 			password := passwordEntry.Text()
@@ -100,17 +103,65 @@ func main() {
 			log.Println("Successfully Logged In!")
 		})
 
+		registerButton.OnClicked(func(*ui.Button) {
+			// Create a new window for registration
+			registrationWindow := ui.NewWindow("Register", 300, 200, false)
+
+			// UI elements for registration
+			registrationUsernameEntry := ui.NewEntry()
+			registrationPasswordEntry := ui.NewPasswordEntry()
+			registerConfirmButton := ui.NewButton("Register")
+
+			registrationBox := ui.NewVerticalBox()
+			registrationBox.Append(ui.NewLabel("Registration Form"), false)
+			registrationBox.Append(registrationUsernameEntry, false)
+			registrationBox.Append(registrationPasswordEntry, false)
+			registrationBox.Append(registerConfirmButton, false)
+
+			registrationWindow.SetChild(registrationBox)
+
+			registerConfirmButton.OnClicked(func(*ui.Button) {
+				// Get username and password from the registration form
+				newUsername := registrationUsernameEntry.Text()
+				newPassword := registrationPasswordEntry.Text()
+
+				// Hash the password before storing it in the database
+				hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordCost)
+				if err != nil {
+					log.Println("Error hashing password:", err)
+					return
+				}
+
+				// Insert the new user into the database
+				insertStmt := `INSERT INTO users (username, hashed_password) VALUES (?, ?)`
+				_, err = db.Exec(insertStmt, newUsername, hashedPassword)
+				if err != nil {
+					log.Println("Error inserting user:", err)
+					return
+				}
+
+				log.Println("User registered successfully!")
+				// Close the registration window after successful registration
+				registrationWindow.Destroy()
+			})
+
+			// Show the registration window
+			registrationWindow.Show()
+		})
+
 		window.OnClosing(func(*ui.Window) bool {
 			ui.Quit()
 			return true
 		})
 
 		window.Show()
-	})
 
+	})
+	defer db.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
+
 }
 
 func handleButtonClick(button string, currentExpression *string, calculationEntry *ui.Entry) {
@@ -203,7 +254,14 @@ func splitOperands(expression string) []string {
 	// to extract the operands
 	var operands []string
 	currentOperand := ""
-	for _, char := range expression {
+
+	// Add a check for the first character to handle the case where it is an operator
+	for i, char := range expression {
+		if i == 0 && (char == '+' || char == '-' || char == '*' || char == '/') {
+			currentOperand = string(char)
+			continue
+		}
+
 		if char == '+' || char == '-' || char == '*' || char == '/' {
 			if currentOperand != "" {
 				operands = append(operands, currentOperand)
@@ -212,8 +270,10 @@ func splitOperands(expression string) []string {
 		}
 		currentOperand += string(char)
 	}
+
 	if currentOperand != "" {
 		operands = append(operands, currentOperand)
 	}
+
 	return operands
 }
