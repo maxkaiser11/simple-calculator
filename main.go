@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 
 	"github.com/andlabs/ui"
@@ -186,24 +187,48 @@ func handleButtonClick(button string, currentExpression *string, calculationEntr
 }
 
 func evaluateExpression(expression string) (float64, error) {
-	// Your existing calculation functions
-
 	if len(expression) == 0 {
 		return 0, nil
 	}
 
-	switch expression[len(expression)-1] {
-	case '+':
-		return addition(expression[:len(expression)-1])
-	case '-':
-		return subtraction(expression[:len(expression)-1])
-	case '*':
-		return multiplication(expression[:len(expression)-1])
-	case '/':
-		return division(expression[:len(expression)-1])
-	default:
+	// Use regular expression to split expression into operands and operator
+	r := regexp.MustCompile(`(\d+\.?\d*)|([\+\-\*/])`)
+	tokens := r.FindAllString(expression, -1)
+
+	if len(tokens)%2 == 0 {
 		return 0, fmt.Errorf("invalid expression")
 	}
+
+	result, err := strconv.ParseFloat(tokens[0], 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid expression")
+	}
+
+	for i := 1; i < len(tokens); i += 2 {
+		operator := tokens[i]
+		operand, err := strconv.ParseFloat(tokens[i+1], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid expression")
+		}
+
+		switch operator {
+		case "+":
+			result += operand
+		case "-":
+			result -= operand
+		case "*":
+			result *= operand
+		case "/":
+			if operand == 0 {
+				return 0, fmt.Errorf("division by zero")
+			}
+			result /= operand
+		default:
+			return 0, fmt.Errorf("invalid operator")
+		}
+	}
+
+	return result, nil
 }
 
 func addition(expression string) (float64, error) {
@@ -255,20 +280,15 @@ func splitOperands(expression string) []string {
 	var operands []string
 	currentOperand := ""
 
-	// Add a check for the first character to handle the case where it is an operator
-	for i, char := range expression {
-		if i == 0 && (char == '+' || char == '-' || char == '*' || char == '/') {
-			currentOperand = string(char)
-			continue
-		}
-
+	for _, char := range expression {
 		if char == '+' || char == '-' || char == '*' || char == '/' {
 			if currentOperand != "" {
 				operands = append(operands, currentOperand)
 				currentOperand = ""
 			}
+		} else {
+			currentOperand += string(char)
 		}
-		currentOperand += string(char)
 	}
 
 	if currentOperand != "" {
