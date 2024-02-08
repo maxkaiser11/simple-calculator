@@ -1,98 +1,219 @@
 package main
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"strconv"
+
+	"github.com/andlabs/ui"
+	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
+)
 
 func main() {
-
-	for {
-		var username string
-		var password string
-
-		fmt.Println("Username: ")
-		fmt.Scan(&username)
-
-		fmt.Println("Password: ")
-		fmt.Scan(&password)
-
-		if username == "maxkaiser" && password == "max98" {
-			fmt.Println("Succsefully Logged In!")
-			break
-		} else {
-			fmt.Println("Wrong Username or Password!, Please try again.")
+	err := ui.Main(func() {
+		db, err := sql.Open("sqlite3", "./users.db")
+		if err != nil {
+			log.Fatal(err)
 		}
+
+		sqlStmt := `
+		CREATE TABLE IF NOT EXISTS users (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL UNIQUE,
+			hashed_password TEXT NOT NULL
+		);
+		`
+
+		_, err = db.Exec(sqlStmt)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		const passwordCost = 14
+
+		usernameEntry := ui.NewEntry()
+		passwordEntry := ui.NewPasswordEntry()
+		loginButton := ui.NewButton("Login")
+		registerButton := ui.NewButton("Register")
+		calculationEntry := ui.NewEntry()
+		calculationEntry.SetReadOnly(true)
+		// var currentExpression string
+
+		buttons := [][]string{
+			{"7", "8", "9", "/"},
+			{"4", "5", "6", "*"},
+			{"1", "2", "3", "-"},
+			{"0", ".", "=", "+"},
+		}
+
+		buttonGrid := ui.NewGrid()
+
+		for i, row := range buttons {
+			for j, label := range row {
+				button := ui.NewButton(label)
+				buttonGrid.Append(button, i, j, 1, 1, false, ui.AlignFill, false, ui.AlignFill)
+			}
+		}
+
+		box := ui.NewVerticalBox()
+		box.Append(ui.NewLabel("Login Form"), false)
+		box.Append(usernameEntry, false)
+		box.Append(passwordEntry, false)
+
+		buttonBox := ui.NewHorizontalBox()
+		buttonBox.Append(loginButton, false)
+		buttonBox.Append(registerButton, false)
+		box.Append(buttonBox, false)
+
+		vbox := ui.NewVerticalBox()
+		vbox.Append(ui.NewLabel("Calculator"), false)
+		vbox.Append(calculationEntry, false)
+		vbox.Append(buttonGrid, false)
+
+		box.Append(vbox, false)
+
+		window := ui.NewWindow("Login App", 400, 300, false)
+		window.SetChild(box)
+
+		defer db.Close()
+
+		loginButton.OnClicked(func(*ui.Button) {
+			username := usernameEntry.Text()
+			password := passwordEntry.Text()
+
+			var hashedPasswordDB string
+			sqlStmt := `SELECT hashed_password FROM users WHERE username = ?`
+			err = db.QueryRow(sqlStmt, username).Scan(&hashedPasswordDB)
+			if err != nil {
+				log.Println("Invalid username:", err)
+				return
+			}
+
+			err = bcrypt.CompareHashAndPassword([]byte(hashedPasswordDB), []byte(password))
+			if err != nil {
+				log.Println("Invalid password:", err)
+				return
+			}
+
+			log.Println("Successfully Logged In!")
+		})
+
+		window.OnClosing(func(*ui.Window) bool {
+			ui.Quit()
+			return true
+		})
+
+		window.Show()
+	})
+
+	if err != nil {
+		log.Fatal(err)
 	}
+}
 
-	fmt.Println("Which calculation would you like to do?(+,-,/,*)")
-	var calculationInput string
-	fmt.Scan(&calculationInput)
-
-	firstNumber := "Please enter the first number."
-	secondNumber := "Please enter the second number"
-
-	switch calculationInput {
-	case "+":
-		fmt.Println(firstNumber)
-		var add1 int64
-		fmt.Scan(&add1)
-		fmt.Println(secondNumber)
-		var add2 int64
-		fmt.Scan(&add2)
-
-		result := addition(add1, add2)
-		fmt.Printf("The sum of %v + %v is: %v", add1, add2, result)
-	case "-":
-		fmt.Println(firstNumber)
-		var sub1 int64
-		fmt.Scan(&sub1)
-
-		fmt.Println(secondNumber)
-		var sub2 int64
-		fmt.Scan(&sub2)
-
-		result := subtraction(sub1, sub2)
-		fmt.Printf("The sum of %v - %v is: %v", sub1, sub2, result)
-	case "*":
-		fmt.Println(firstNumber)
-		var multi1 float64
-		fmt.Scan(&multi1)
-
-		fmt.Println(secondNumber)
-		var multi2 float64
-		fmt.Scan(&multi2)
-
-		result := multiplication(multi1, multi2)
-		fmt.Printf("The sum of %v * %v is: %v", multi1, multi2, result)
+func handleButtonClick(button string, currentExpression *string, calculationEntry *ui.Entry) {
+	switch button {
+	case "=":
+		result, err := evaluateExpression(*currentExpression)
+		if err != nil {
+			log.Println("Error in calculation:", err)
+			return
+		}
+		*currentExpression = strconv.FormatFloat(result, 'f', -1, 64)
+	case ".":
+		// Handle decimal point separately
+		if len(*currentExpression) > 0 && (*currentExpression)[len(*currentExpression)-1] != '.' {
+			*currentExpression += button
+		}
 	default:
+		*currentExpression += button
+	}
 
-		fmt.Println(firstNumber)
-		var div1 float64
-		fmt.Scan(&div1)
+	calculationEntry.SetText(*currentExpression)
+}
 
-		fmt.Println(secondNumber)
-		var div2 float64
-		fmt.Scan(&div2)
+func evaluateExpression(expression string) (float64, error) {
+	// Your existing calculation functions
 
-		result := division(div1, div2)
-		fmt.Printf("The sum of %v / %v is: %v", div1, div2, result)
+	if len(expression) == 0 {
+		return 0, nil
+	}
+
+	switch expression[len(expression)-1] {
+	case '+':
+		return addition(expression[:len(expression)-1])
+	case '-':
+		return subtraction(expression[:len(expression)-1])
+	case '*':
+		return multiplication(expression[:len(expression)-1])
+	case '/':
+		return division(expression[:len(expression)-1])
+	default:
+		return 0, fmt.Errorf("invalid expression")
 	}
 }
 
-func addition(n1, n2 int64) int64 {
-	sum := n1 + n2
-	return sum
+func addition(expression string) (float64, error) {
+	operands := parseOperands(expression)
+	if len(operands) != 2 {
+		return 0, fmt.Errorf("invalid addition expression")
+	}
+	return operands[0] + operands[1], nil
 }
 
-func subtraction(n1, n2 int64) int64 {
-	sum := n1 - n2
-	return sum
+func subtraction(expression string) (float64, error) {
+	operands := parseOperands(expression)
+	if len(operands) != 2 {
+		return 0, fmt.Errorf("invalid subtraction expression")
+	}
+	return operands[0] - operands[1], nil
 }
 
-func multiplication(n1, n2 float64) float64 {
-	sum := n1 * n2
-	return sum
+func multiplication(expression string) (float64, error) {
+	operands := parseOperands(expression)
+	if len(operands) != 2 {
+		return 0, fmt.Errorf("invalid multiplication expression")
+	}
+	return operands[0] * operands[1], nil
 }
 
-func division(n1, n2 float64) float64 {
-	sum := n1 / n2
-	return sum
+func division(expression string) (float64, error) {
+	operands := parseOperands(expression)
+	if len(operands) != 2 || operands[1] == 0 {
+		return 0, fmt.Errorf("invalid division expression")
+	}
+	return operands[0] / operands[1], nil
+}
+
+func parseOperands(expression string) []float64 {
+	// Split the expression into operands
+	// and convert them to float64
+	var operands []float64
+	for _, operandStr := range splitOperands(expression) {
+		operand, _ := strconv.ParseFloat(operandStr, 64)
+		operands = append(operands, operand)
+	}
+	return operands
+}
+
+func splitOperands(expression string) []string {
+	// Split the expression by operators
+	// to extract the operands
+	var operands []string
+	currentOperand := ""
+	for _, char := range expression {
+		if char == '+' || char == '-' || char == '*' || char == '/' {
+			if currentOperand != "" {
+				operands = append(operands, currentOperand)
+				currentOperand = ""
+			}
+		}
+		currentOperand += string(char)
+	}
+	if currentOperand != "" {
+		operands = append(operands, currentOperand)
+	}
+	return operands
 }
